@@ -1,11 +1,9 @@
 # B&B BIOPLAST
 
-Thai industrial automation website based on the supplied design reference.
+Responsive Thai industrial automation website.
 
-## Run
+Run with Node.js 18+: npm start. Health check: /health. Railway uses PORT.
 
-Requires Node.js 18 or newer. Run `npm start` and open http://localhost:3000.
+Quote requests open an email draft to bbioplast@gmail.com. The site does not store form submissions.
 
-No application dependencies. Railway uses the PORT environment variable and /health for health checks.
-
-The quote form opens an email draft; it does not silently submit information. Product imagery and example specifications come from the supplied reference. Confirm company claims, specifications and contact information before commercial use.
+Product visuals and example specifications are from the supplied design reference. Verify company claims, specifications and contact details before commercial use.
