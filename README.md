@@ -1,9 +1,12 @@
-# B&B BIOPLAST
+# B&B Bioplast Tech
 
-Responsive Thai industrial automation website.
+Responsive Thai industrial automation website, deployed on Railway.
 
-Run with Node.js 18+: npm start. Health check: /health. Railway uses PORT.
+## Local run
 
-Quote requests open an email draft to bbioplast@gmail.com. The site does not store form submissions.
+Requires Node.js 18 or newer. Run `npm start` and open http://localhost:3000. Run `npm run check` for JavaScript syntax validation.
 
-Product visuals and example specifications are from the supplied design reference. Verify company claims, specifications and contact details before commercial use.
+No application dependencies. The server uses Railway's PORT environment variable and /health for health checks.
+
+Company and product content is sourced from bbioplast.com. See CONTENT-SOURCES.md for scope and provenance. site-data.js contains 14 categories, eight portfolio projects and three article links. Contact links open the published LINE, telephone and Facebook channels; no form submission is stored.
+
