@@ -1,0 +1,42 @@
+const {test}=require('node:test');const assert=require('node:assert/strict');const http=require('node:http');const fs=require('node:fs');const os=require('node:os');const path=require('node:path');const {randomBytes}=require('node:crypto');const {createBackend,hash}=require('../backend');
+test('authentication, quotation approval, inventory integrity and durable data',async()=>{
+ const dataDir=fs.mkdtempSync(path.join(os.tmpdir(),'bb-commerce-')),setup=randomBytes(32).toString('hex');let backend=createBackend({dataDir,adminEmail:'admin@example.test',bootstrapHash:hash(setup),bootstrapExpires:Date.now()+60000,production:false});
+ const server=http.createServer((req,res)=>backend.handle(req,res,new URL(req.url,'http://localhost')));await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port;let cookie='',csrf='';
+ const call=async(url,method='GET',data,extra={})=>{const r=await fetch(origin+url,{method,headers:{'Content-Type':'application/json','X-Requested-With':'BBWeb','Origin':origin,Cookie:cookie,'X-CSRF-Token':csrf,...extra},body:data===undefined?undefined:JSON.stringify(data)});const c=r.headers.get('set-cookie');if(c)cookie=c.split(';')[0];return {status:r.status,data:await r.json()};};
+ try{
+  assert.equal((await call('/api/admin/catalog')).status,401);
+  assert.equal((await call('/api/auth/setup','POST',{email:'admin@example.test',password:'local-test-password-123',token:setup},{Origin:'https://attacker.test'})).status,403);
+  assert.equal((await call('/api/auth/setup','POST',{email:'admin@example.test',password:'local-test-password-123',token:setup})).status,201);
+  assert.equal((await call('/api/auth/setup','POST',{email:'admin@example.test',password:'local-test-password-123',token:setup})).status,409);
+  assert.equal((await call('/api/auth/login','POST',{email:'admin@example.test',password:'incorrect'})).status,401);
+  const login=await call('/api/auth/login','POST',{email:'admin@example.test',password:'local-test-password-123'});assert.equal(login.status,200);csrf=login.data.csrf;
+  assert.equal((await call('/api/admin/categories','POST',{name:'Should fail'},{'X-CSRF-Token':''})).status,403);
+  const catalog=(await call('/api/admin/catalog')).data;assert.equal(catalog.categories.length,14);const original=catalog.products[0];
+  assert.equal((await call('/api/admin/products/'+original.id,'PUT',{...original,stock:3,version:original.version})).status,200);
+  assert.equal((await call('/api/admin/products/'+original.id,'PUT',{...original,stock:50,version:original.version})).status,409);
+  const makeRequest=qty=>({requestKey:randomBytes(16).toString('hex'),trackingToken:randomBytes(32).toString('hex'),customer:'ทดสอบ',company:'Test',email:'customer@example.test',phone:'0812345678',address:'Local test address',items:[{productId:original.id,qty,unitPrice:1}],note:'ทดสอบใบเสนอราคา'});
+  const first=makeRequest(2);const created=await call('/api/quotes','POST',first);assert.equal(created.status,201);const id=created.data.id,token=created.data.token;
+  assert.equal((await call('/api/quotes','POST',first)).data.token,token);
+  assert.equal((await call('/api/quote/'+token)).data.items[0].unitPrice,null);
+  assert.equal((await call('/api/quote/'+randomBytes(32).toString('hex'))).status,404);
+  assert.equal((await call('/api/quote/'+token+'/accept','POST',{version:1})).status,409);
+  let quote=(await call('/api/admin/quotes/'+id)).data;
+  const offer=await call('/api/admin/quotes/'+id+'/offer','POST',{version:quote.version,prices:[12345],shipping:6000,validUntil:new Date(Date.now()+86400000).toISOString(),note:'Test terms'});assert.equal(offer.status,200);assert.equal(offer.data.total,30690);
+  assert.equal((await call('/api/quote/'+token+'/accept','POST',{version:1})).status,409);
+  const accepted=await call('/api/quote/'+token+'/accept','POST',{version:offer.data.version});assert.equal(accepted.status,200);
+  assert.equal((await call('/api/admin/catalog')).data.products[0].stock,1);
+  assert.equal((await call('/api/quote/'+token+'/accept','POST',{version:offer.data.version})).status,409);
+  assert.equal((await call('/api/admin/catalog')).data.products[0].stock,1);
+  assert.equal((await call('/api/admin/quotes/'+id+'/status','POST',{version:accepted.data.version,status:'shipped',carrier:'x',tracking:'x'})).status,409);
+  const second=await call('/api/quotes','POST',makeRequest(2));quote=(await call('/api/admin/quotes/'+second.data.id)).data;
+  const secondOffer=await call('/api/admin/quotes/'+quote.id+'/offer','POST',{version:quote.version,prices:[1000],shipping:0,validUntil:new Date(Date.now()+86400000).toISOString(),note:''});
+  assert.equal((await call('/api/quote/'+second.data.token+'/accept','POST',{version:secondOffer.data.version})).status,409);
+  assert.equal((await call('/api/admin/catalog')).data.products[0].stock,1);
+  const cancel=await call('/api/admin/quotes/'+id+'/status','POST',{version:accepted.data.version,status:'cancelled'});assert.equal(cancel.status,200);
+  assert.equal((await call('/api/admin/catalog')).data.products[0].stock,3);
+  assert.equal((await call('/api/admin/quotes/'+id+'/status','POST',{version:cancel.data.version,status:'cancelled'})).status,409);
+  const exported=JSON.stringify((await call('/api/admin/export')).data);assert.ok(!exported.includes('password_hash'));assert.ok(!exported.includes('token_hash'));
+  backend.close();backend=createBackend({dataDir,production:false});assert.equal((await call('/api/quote/'+token)).data.status,'cancelled');assert.equal((await call('/api/admin/catalog')).data.products[0].stock,3);
+  assert.equal((await call('/api/auth/logout','POST',{})).status,200);assert.equal((await call('/api/admin/quotes')).status,401);
+ }finally{await new Promise(r=>server.close(r));backend.close();fs.rmSync(dataDir,{recursive:true,force:true});}
+});
