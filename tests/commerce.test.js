@@ -12,7 +12,9 @@ test('authentication, quotation approval, inventory integrity and durable data',
   const login=await call('/api/auth/login','POST',{email:'admin@example.test',password:'local-test-password-123'});assert.equal(login.status,200);csrf=login.data.csrf;
   assert.equal((await call('/api/admin/categories','POST',{name:'Should fail'},{'X-CSRF-Token':''})).status,403);
   const catalog=(await call('/api/admin/catalog')).data;assert.equal(catalog.categories.length,14);const original=catalog.products[0];
-  assert.equal((await call('/api/admin/products/'+original.id,'PUT',{...original,stock:3,version:original.version})).status,200);
+  assert.equal(original.popular,false);
+  assert.equal((await call('/api/admin/products/'+original.id,'PUT',{...original,stock:3,popular:true,version:original.version})).status,200);
+  assert.equal((await call('/api/catalog')).data.products[0].popular,true);
   assert.equal((await call('/api/admin/products/'+original.id,'PUT',{...original,stock:50,version:original.version})).status,409);
   const makeRequest=qty=>({requestKey:randomBytes(16).toString('hex'),trackingToken:randomBytes(32).toString('hex'),customer:'ทดสอบ',company:'Test',email:'customer@example.test',phone:'0812345678',address:'Local test address',items:[{productId:original.id,qty,unitPrice:1}],note:'ทดสอบใบเสนอราคา'});
   const first=makeRequest(2);const created=await call('/api/quotes','POST',first);assert.equal(created.status,201);const id=created.data.id,token=created.data.token;
@@ -37,6 +39,12 @@ test('authentication, quotation approval, inventory integrity and durable data',
   assert.equal((await call('/api/admin/quotes/'+id+'/status','POST',{version:cancel.data.version,status:'cancelled'})).status,409);
   const exported=JSON.stringify((await call('/api/admin/export')).data);assert.ok(!exported.includes('password_hash'));assert.ok(!exported.includes('token_hash'));
   backend.close();backend=createBackend({dataDir,production:false});assert.equal((await call('/api/quote/'+token)).data.status,'cancelled');assert.equal((await call('/api/admin/catalog')).data.products[0].stock,3);
+  let saved=(await call('/api/admin/catalog')).data.products[0];assert.equal(saved.popular,true);
+  assert.equal((await call('/api/admin/products/'+saved.id,'PUT',{...saved,active:false})).status,200);
+  assert.equal((await call('/api/catalog')).data.products.length,0);
+  saved=(await call('/api/admin/catalog')).data.products[0];
+  assert.equal((await call('/api/admin/products/'+saved.id,'PUT',{...saved,active:true,popular:false})).status,200);
+  assert.equal((await call('/api/catalog')).data.products[0].popular,false);
   assert.equal((await call('/api/auth/logout','POST',{})).status,200);assert.equal((await call('/api/admin/quotes')).status,401);
  }finally{await new Promise(r=>server.close(r));backend.close();fs.rmSync(dataDir,{recursive:true,force:true});}
 });
