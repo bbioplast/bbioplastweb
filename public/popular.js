@@ -19,6 +19,8 @@
       return `<article class="popular-card"><div class="popular-image"><span class="popular-badge">★ สินค้ายอดนิยม</span>${image}</div><div class="popular-info"><span class="popular-category">${esc(category)}</span><h3>${esc(p.name)}</h3><p class="popular-sku">รหัสสินค้า ${esc(p.sku)}</p><p class="popular-description">${esc(p.description)}</p><div class="popular-availability">${p.stock===null?'จัดหาตามคำขอ':p.stock===0?'สอบถามระยะเวลาจัดส่ง':'พร้อมเสนอราคา'}</div><a class="popular-cta" href="/shop?product=${encodeURIComponent(p.id)}">เลือกสินค้าเพื่อขอราคา <span aria-hidden="true">↗</span></a></div></article>`;
     }).join('');
     section.querySelectorAll('img').forEach(img=>img.addEventListener('error',()=>{img.hidden=true;const placeholder=document.createElement('span');placeholder.className='popular-placeholder';placeholder.textContent='B&B';img.after(placeholder);},{once:true}));
+    const keepCatalogAnchor=location.hash==='#products'&&Math.abs(anchor.getBoundingClientRect().top)<180;
     anchor.before(section);
+    if(keepCatalogAnchor)anchor.scrollIntoView({behavior:'instant'});
   }catch(error){console.warn('Popular products could not be loaded.');}
 })();
