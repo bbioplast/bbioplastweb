@@ -20,5 +20,8 @@ For first setup, generate a cryptographically random 32-byte token, set ADMIN_SE
 
 Initial catalog: 14 real categories and one verified model, Suction Pad 10C-1N. Prices and stock remain unspecified until entered by the owner. Other models can be requested as custom items. Marketing content on the home page is sourced separately from bbioplast.com; see CONTENT-SOURCES.md.
 
+## Popular products
+In `/admin`, edit a product and enable “แสดงในสินค้ายอดนิยม”. Active selected products appear on the home page (up to four, sorted by name) and in the `/shop?popular=1` filter. Cards link directly to the matching SKU in the quotation flow. Selection is curated by staff, not calculated from sales. No products are selected automatically; the home section stays hidden until a product is selected. The additive SQLite migration defaults existing products to unselected and preserves catalog, stock and quotations.
+
 ## Security and checks
 Passwords use salted scrypt; session tokens and customer links are stored hashed. Admin mutations require a session, same-origin request and CSRF token. Quotation acceptance checks expiry/version and inventory in a database transaction. Tests cover authentication, authorization, idempotency, price tampering, stock reservations/cancellation and persistence across restart.
