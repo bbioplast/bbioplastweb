@@ -25,3 +25,8 @@ In `/admin`, edit a product and enable “แสดงในสินค้า�
 
 ## Security and checks
 Passwords use salted scrypt; session tokens and customer links are stored hashed. Admin mutations require a session, same-origin request and CSRF token. Quotation acceptance checks expiry/version and inventory in a database transaction. Tests cover authentication, authorization, idempotency, price tampering, stock reservations/cancellation and persistence across restart.
+
+## Blog
+`/blog` lists published articles and `/blog/:slug` opens an article. In `/admin`, use “บทความ / Blog” to write, preview, edit, publish, revert to draft, or archive posts. Archived posts are recoverable by changing their status. Posts live in the existing persistent SQLite database and are included in admin JSON exports. There are no seeded production articles.
+
+The editor supports plain text, # / ## / ### headings, paragraph breaks and - bullet lists. Raw HTML is escaped. Cover images use HTTPS URLs. Slugs use lowercase ASCII letters, digits and hyphens; leaving one blank creates a stable generated URL. Changing a slug does not redirect its previous URL. Drafts and archived posts are not available through public endpoints. Version checks prevent stale edits; admin writes require the existing session, same-origin and CSRF protection.
