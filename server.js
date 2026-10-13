@@ -4,6 +4,7 @@ const path = require('path');
 const root = path.join(__dirname, 'public');
 const {createBackend}=require('./backend');
 const backend=createBackend();
+const renderPage=require('./render-page');
 const types = {'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.png':'image/png'};
 const server=http.createServer(async(req,res)=>{
   let pathname; try { pathname = decodeURIComponent(new URL(req.url,'http://localhost').pathname); } catch { res.writeHead(400); return res.end(); }
@@ -15,6 +16,6 @@ const server=http.createServer(async(req,res)=>{
   if(/^\/blog\/[a-z0-9]+(?:-[a-z0-9]+)*$/.test(pathname)){const slug=pathname.slice(6);if(!backend.db.prepare("SELECT 1 FROM posts WHERE slug=? AND status='published'").get(slug)){res.writeHead(404,{'Content-Type':'text/html; charset=utf-8'});return res.end('<html lang="th"><meta charset="utf-8"><title>ไม่พบบทความ</title><h1>ไม่พบบทความ</h1><a href="/blog">กลับไปหน้าบทความ</a></html>');}pathname='/blog.html';res.setHeader('Cache-Control','no-store');}
   const file = path.resolve(root, '.' + (pathname==='/'?'/index.html':pathname));
   if(!file.startsWith(root+path.sep)){res.writeHead(403);return res.end();}
-  fs.readFile(file,(err,data)=>{if(err){res.writeHead(404);return res.end('Not found');}res.writeHead(200,{'Content-Type':types[path.extname(file)]||'application/octet-stream','X-Content-Type-Options':'nosniff'});res.end(data);});
+  fs.readFile(file,(err,data)=>{if(err){res.writeHead(404);return res.end('Not found');}res.writeHead(200,{'Content-Type':types[path.extname(file)]||'application/octet-stream','X-Content-Type-Options':'nosniff'});res.end(path.extname(file)==='.html'?renderPage(data,file):data);});
 }).listen(process.env.PORT||3000,'0.0.0.0');
 process.on('SIGTERM',()=>server.close(()=>{backend.close();process.exit(0);}));
