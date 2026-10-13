@@ -34,7 +34,7 @@ function createBackend(options={}){
  const limits=new Map();
  function rate(req,key,max=30){const ip=req.socket.remoteAddress||'unknown';const k=key+':'+ip;const t=Date.now();let item=limits.get(k);if(!item||t>item.until)item={count:0,until:t+600000};item.count++;limits.set(k,item);if(limits.size>10000){for(const [k,v]of limits)if(v.until<t)limits.delete(k);}if(item.count>max)fail('คำขอมากเกินไป กรุณาลองใหม่ใน 10 นาที',429);}
  function send(res,status,data){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'});res.end(JSON.stringify(data));}
- async function body(req){if(!(req.headers['content-type']||'').startsWith('application/json'))fail('ต้องส่งข้อมูลแบบ JSON',415);let b='';for await(const chunk of req){b+=chunk;if(Buffer.byteLength(b)>150000)fail('ข้อมูลมีขนาดใหญ่เกินไป',413);}try{return JSON.parse(b||'{}');}catch{fail('ข้อมูลไม่ถูกต้อง');}}
+ async function body(req,maxBytes=150000){if(!(req.headers['content-type']||'').startsWith('application/json'))fail('ต้องส่งข้อมูลแบบ JSON',415);const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>maxBytes)fail('ข้อมูลมีขนาดใหญ่เกินไป',413);chunks.push(chunk);}try{return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');}catch{fail('ข้อมูลไม่ถูกต้อง');}}
  function session(req){const cookies=(req.headers.cookie||'').split(';').map(v=>v.trim());const raw=cookies.find(v=>v.startsWith('bb_session='))?.slice(11);if(!raw)return null;return q('SELECT * FROM sessions WHERE hash=? AND expires>?',hash(raw),Date.now());}
  function auth(req){const s=session(req);if(!s)fail('กรุณาเข้าสู่ระบบ',401);if(!['GET','HEAD'].includes(req.method)&&req.headers['x-csrf-token']!==s.csrf)fail('กรุณารีเฟรชหน้าแล้วลองใหม่',403);return s;}
  function cookie(res,value,maxAge){res.setHeader('Set-Cookie',`bb_session=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${production?'; Secure':''}`);}
@@ -42,11 +42,13 @@ function createBackend(options={}){
  const product=row=>({...row,active:!!row.active,popular:!!row.popular});
  function validateProduct(b){const p={sku:text(b.sku,80),name:text(b.name,160),category_id:text(b.category_id,100),description:text(b.description,5000),image:text(b.image,1500),price:b.price??null,stock:b.stock??null,active:b.active===true?1:0,popular:b.popular===true?1:0};if(!p.sku||!p.name||!q('SELECT 1 FROM categories WHERE id=?',p.category_id))fail('กรุณาระบุ SKU ชื่อ และหมวดสินค้าให้ครบ');if(p.price!==null&&!integer(p.price))fail('ราคาไม่ถูกต้อง');if(p.stock!==null&&!integer(p.stock,0,1000000))fail('สต็อกไม่ถูกต้อง');if(p.image&&!/^https:\/\/[^\s]+$/i.test(p.image))fail('ลิงก์รูปภาพต้องเริ่มด้วย https://');return p;}
  const blog=require('./blog-backend')({db,auth,body,send,fail,audit});
+ const productImport=require('./product-import')({db,auth,body,send,fail,audit,transaction,validateProduct});
  async function handle(req,res,url){if(!url.pathname.startsWith('/api/'))return false;
  try{
  const p=url.pathname,m=req.method;
  if(!['GET','HEAD'].includes(m)){const origin=req.headers.origin;const allowed=options.origin||process.env.PUBLIC_ORIGIN||`http://${req.headers.host}`;if(origin!==allowed||req.headers['x-requested-with']!=='BBWeb')fail('คำขอจากเว็บไซต์อื่นไม่ได้รับอนุญาต',403);}
  if(await blog(req,res,url))return true;
+ if(p.startsWith('/api/admin/products/import/')){rate(req,'product-import',30);return await productImport(req,res,url);}
  if(p==='/api/catalog'&&m==='GET'){send(res,200,{categories:all('SELECT * FROM categories ORDER BY name'),products:all('SELECT * FROM products WHERE active=1 ORDER BY name').map(product)});return true;}
  if(p==='/api/auth/status'&&m==='GET'){const s=session(req);send(res,200,{setupRequired:!q('SELECT 1 FROM admins'),email:s?.email||null,csrf:s?.csrf||null});return true;}
  if(p==='/api/auth/setup'&&m==='POST'){
