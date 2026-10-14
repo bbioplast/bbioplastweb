@@ -12,7 +12,7 @@ const server=http.createServer(async(req,res)=>{
   if(pathname==='/health'){try{backend.db.prepare('SELECT 1').get();res.writeHead(200);return res.end('ok');}catch{res.writeHead(503);return res.end('unavailable');}}
   if(await backend.handle(req,res,new URL(req.url,'http://localhost')))return;
   if(!['GET','HEAD'].includes(req.method)){res.writeHead(405);return res.end();}
-  if(['/admin','/shop','/quote','/products','/blog'].includes(pathname)){pathname=pathname+'.html';res.setHeader('Cache-Control','no-store');}
+  if(['/admin','/shop','/quote','/products','/blog','/contact'].includes(pathname)){pathname=pathname+'.html';res.setHeader('Cache-Control','no-store');}
   if(/^\/blog\/[a-z0-9]+(?:-[a-z0-9]+)*$/.test(pathname)){const slug=pathname.slice(6);if(!backend.db.prepare("SELECT 1 FROM posts WHERE slug=? AND status='published'").get(slug)){res.writeHead(404,{'Content-Type':'text/html; charset=utf-8'});return res.end('<html lang="th"><meta charset="utf-8"><title>ไม่พบบทความ</title><h1>ไม่พบบทความ</h1><a href="/blog">กลับไปหน้าบทความ</a></html>');}pathname='/blog.html';res.setHeader('Cache-Control','no-store');}
   const file = path.resolve(root, '.' + (pathname==='/'?'/index.html':pathname));
   if(!file.startsWith(root+path.sep)){res.writeHead(403);return res.end();}
