@@ -19,6 +19,8 @@ test('CMS shares authentication; drafts, previews, publication, section order, S
  const rev=(await call('/api/admin/cms/revisions?key=page-home')).data.revisions;assert.equal(rev.length,2);
  const bad=structuredClone(data);bad.sections[0].fields[0].key='invalid';assert.equal((await call('/api/admin/cms/documents/page-home','PUT',{data:bad,version:saved.data.version})).status,400);
  assert.deepEqual((await call('/api/admin/catalog')).data,catalog);assert.equal(app.backend.db.prepare('SELECT COUNT(*) n FROM cms_migrations').get().n,1);
+ const global=(await call('/api/admin/cms/documents/seo')).data;global.draft.title='ชื่อเว็บไซต์เริ่มต้น';global.draft.description='คำอธิบายเริ่มต้น';global.draft.canonical='https://bbioplastweb-production.up.railway.app/';assert.equal((await call('/api/admin/cms/documents/seo','PUT',{data:global.draft,version:global.version,publish:true,confirm:true})).status,200);
+ assert.equal(cheerio.load((await call('/')).data)('title').text(),'SEO หน้าแรกใหม่');data.seo.title='';data.seo.description='';assert.equal((await call('/api/admin/cms/documents/page-home','PUT',{data,version:saved.data.version,publish:true,confirm:true})).status,200);assert.equal(cheerio.load((await call('/')).data)('title').text(),'ชื่อเว็บไซต์เริ่มต้น');assert.equal(cheerio.load((await call('/contact')).data)('link[rel=canonical]').attr('href'),'https://bbioplastweb-production.up.railway.app/contact');
 }));
 
 test('CMS media validates and reencodes raster/SVG, deduplicates, blocks referenced deletion and updates company only on publish',async()=>fixture(async({app,call,login})=>{
