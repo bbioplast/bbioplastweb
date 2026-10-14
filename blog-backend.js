@@ -1,31 +1,28 @@
-const {randomBytes}=require('node:crypto');
+const {randomBytes}=require('node:crypto');const {safeUrl,richHtml,seo,slugOK}=require('./cms-content');
 module.exports=function createBlog({db,auth,body,send,fail,audit}){
  db.exec(`CREATE TABLE IF NOT EXISTS posts(id TEXT PRIMARY KEY,slug TEXT NOT NULL UNIQUE,title TEXT NOT NULL,excerpt TEXT NOT NULL DEFAULT '',content TEXT NOT NULL,cover TEXT NOT NULL DEFAULT '',category TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','published','archived')),version INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,published_at TEXT); CREATE INDEX IF NOT EXISTS posts_public ON posts(status,published_at);`);
- const list=()=>db.prepare('SELECT * FROM posts ORDER BY updated_at DESC').all();
  const clean=(v,max)=>{if(typeof v!=='string'||v.length>max)fail('ข้อมูลบทความไม่ถูกต้องหรือยาวเกินกำหนด');return v.trim();};
  return async(req,res,url)=>{
-  const p=url.pathname,m=req.method;
-  if(p==='/api/blog'&&m==='GET'){send(res,200,{posts:db.prepare("SELECT id,slug,title,excerpt,cover,category,published_at,updated_at FROM posts WHERE status='published' ORDER BY published_at DESC,id").all()});return true;}
-  if(p.startsWith('/api/blog/')&&m==='GET'){let slug;try{slug=decodeURIComponent(p.slice(10));}catch{fail('ไม่พบบทความ',404);}const post=db.prepare("SELECT slug,title,excerpt,content,cover,category,published_at,updated_at FROM posts WHERE slug=? AND status='published'").get(slug);if(!post)fail('ไม่พบบทความ',404);send(res,200,post);return true;}
-  if(p!=='/api/admin/posts'&&!p.startsWith('/api/admin/posts/'))return false;
-  const session=auth(req);
-  if(p==='/api/admin/posts'&&m==='GET'){send(res,200,{posts:list()});return true;}
-  const match=p.match(/^\/api\/admin\/posts(?:\/([a-f0-9]{16}))?$/);
-  if(!match||!(m==='POST'&&!match[1]||m==='PUT'&&match[1]))fail('ไม่พบรายการ',404);
-  const b=await body(req),id=match[1]||randomBytes(8).toString('hex'),current=match[1]?db.prepare('SELECT * FROM posts WHERE id=?').get(id):null;
-  if(match[1]&&!current)fail('ไม่พบบทความ',404);
-  if(current&&b.version!==current.version)fail('บทความถูกแก้ไขจากที่อื่น กรุณาโหลดใหม่ก่อนบันทึก',409);
-  const title=clean(b.title,180),content=clean(b.content,60000),excerpt=clean(b.excerpt||'',400),cover=clean(b.cover||'',1500),category=clean(b.category||'',80),slug=clean(b.slug||current?.slug||'article-'+id,120);
-  if(!title||!content)fail('กรุณาระบุหัวข้อและเนื้อหาบทความ');
-  if(!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug))fail('ลิงก์บทความใช้ a–z, 0–9 และขีดกลางเท่านั้น');
-  if(cover){try{if(new URL(cover).protocol!=='https:')throw Error();}catch{fail('ลิงก์รูปปกต้องเป็น HTTPS');}}
-  if(!['draft','published','archived'].includes(b.status))fail('สถานะบทความไม่ถูกต้อง');
-  if(db.prepare('SELECT id FROM posts WHERE slug=? AND id<>?').get(slug,id))fail('ลิงก์บทความนี้ถูกใช้แล้ว',409);
-  const now=new Date().toISOString(),published=current?.published_at||(b.status==='published'?now:null);
+  const p=url.pathname,m=req.method,now=new Date().toISOString();
+  if(p==='/api/blog'&&m==='GET'){send(res,200,{posts:db.prepare("SELECT id,slug,title,excerpt,cover,category,published_at,updated_at FROM posts WHERE status='published' AND deleted_at IS NULL AND published_at<=? ORDER BY published_at DESC,id").all(now)});return true;}
+  if(p.startsWith('/api/blog/')&&m==='GET'){let slug;try{slug=decodeURIComponent(p.slice(10));}catch{fail('ไม่พบบทความ',404);}const post=db.prepare("SELECT slug,title,excerpt,content,format,seo,cover,category,published_at,updated_at FROM posts WHERE slug=? AND status='published' AND deleted_at IS NULL AND published_at<=?").get(slug,now);if(!post)fail('ไม่พบบทความ',404);send(res,200,post);return true;}
+  if(!p.startsWith('/api/admin/posts')&&!p.startsWith('/api/admin/post-categories'))return false;const session=auth(req);
+  if(p==='/api/admin/post-categories'){if(m==='GET'){send(res,200,{categories:db.prepare('SELECT name FROM cms_blog_categories ORDER BY name').all()});return true;}if(m==='POST'){const b=await body(req),name=clean(b.name||'',80);if(!name)fail('กรุณาระบุชื่อหมวดหมู่');db.prepare('INSERT OR IGNORE INTO cms_blog_categories VALUES(?)').run(name);audit(session.email,'cms.blog.category',name);send(res,200,{ok:true});return true;}}
+  const category=p.match(/^\/api\/admin\/post-categories\/(.+)$/);if(category&&['PUT','DELETE'].includes(m)){const old=decodeURIComponent(category[1]),b=await body(req);if(m==='DELETE'){if(b.confirm!==true)fail('กรุณายืนยันการลบหมวดหมู่');if(db.prepare('SELECT 1 FROM posts WHERE category=? AND deleted_at IS NULL').get(old))fail('มีบทความใช้งานหมวดหมู่นี้อยู่',409);db.prepare('DELETE FROM cms_blog_categories WHERE name=?').run(old);}else{const name=clean(b.name||'',80);if(!name)fail('กรุณาระบุชื่อ');db.exec('BEGIN IMMEDIATE');try{db.prepare('UPDATE cms_blog_categories SET name=? WHERE name=?').run(name,old);db.prepare('UPDATE posts SET category=?,version=version+1,updated_at=? WHERE category=?').run(name,now,old);db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}}audit(session.email,'cms.blog.category',old);send(res,200,{ok:true});return true;}
+  if(p==='/api/admin/posts'&&m==='GET'){send(res,200,{posts:db.prepare('SELECT * FROM posts WHERE deleted_at IS NULL ORDER BY updated_at DESC').all()});return true;}
+  const match=p.match(/^\/api\/admin\/posts(?:\/([a-f0-9]{16}))?$/);if(!match||!['POST','PUT','DELETE'].includes(m)||m==='POST'&&match[1]||m!=='POST'&&!match[1])fail('ไม่พบรายการ',404);
+  const b=await body(req,250000),id=match[1]||randomBytes(8).toString('hex'),current=match[1]?db.prepare('SELECT * FROM posts WHERE id=? AND deleted_at IS NULL').get(id):null;
+  if(match[1]&&!current)fail('ไม่พบบทความ',404);if(current&&b.version!==current.version)fail('บทความถูกแก้ไขจากที่อื่น กรุณาโหลดใหม่ก่อนบันทึก',409);
+  if(m==='DELETE'){if(b.confirm!==true)fail('กรุณายืนยันการลบบทความ');db.prepare('UPDATE posts SET deleted_at=?,version=version+1 WHERE id=?').run(now,id);audit(session.email,'post.deleted',id);send(res,200,{ok:true});return true;}
+  const title=clean(b.title,180),format=b.format||current?.format||'text',raw=clean(b.content,100000),content=format==='html'?richHtml(raw):raw,excerpt=clean(b.excerpt||'',400),categoryName=clean(b.category||'',80),slug=clean(b.slug||current?.slug||'article-'+id,120);
+  let cover,seoData;try{cover=safeUrl(clean(b.cover||'',1800),{image:true});seoData=seo(b.seo===undefined?JSON.parse(current?.seo||'{}'):b.seo);}catch(e){fail(e.message);}
+  if(!title||!content||!['text','html'].includes(format))fail('กรุณาระบุหัวข้อและเนื้อหาบทความ');if(!slugOK(slug))fail('ลิงก์บทความใช้ a–z, 0–9 และขีดกลางเท่านั้น');if(!['draft','published','archived'].includes(b.status))fail('สถานะบทความไม่ถูกต้อง');
+  if(db.prepare('SELECT id FROM posts WHERE slug=? AND id<>?').get(slug,id)||db.prepare('SELECT 1 FROM cms_redirects WHERE path=?').get('/blog/'+slug))fail('ลิงก์บทความนี้ถูกใช้แล้ว',409);
+  let published=b.published_at===undefined?(current?.published_at||(b.status==='published'?now:null)):(b.published_at?Date.parse(b.published_at):b.status==='published'?now:null);if(typeof published==='number'){if(!Number.isFinite(published))fail('วันที่เผยแพร่ไม่ถูกต้อง');published=new Date(published).toISOString();}if(b.status==='published'&&!published)fail('กรุณาระบุวันที่เผยแพร่');
   db.exec('BEGIN IMMEDIATE');try{
-   if(current){const saved=db.prepare('UPDATE posts SET slug=?,title=?,excerpt=?,content=?,cover=?,category=?,status=?,published_at=?,updated_at=?,version=version+1 WHERE id=? AND version=?').run(slug,title,excerpt,content,cover,category,b.status,published,now,id,b.version);if(!saved.changes)fail('บทความถูกแก้ไขแล้ว กรุณาโหลดใหม่',409);}
-   else db.prepare('INSERT INTO posts(id,slug,title,excerpt,content,cover,category,status,created_at,updated_at,published_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(id,slug,title,excerpt,content,cover,category,b.status,now,now,published);
-   audit(session.email,'post.'+b.status,id);db.exec('COMMIT');
+   if(current){const saved=db.prepare('UPDATE posts SET slug=?,title=?,excerpt=?,content=?,format=?,seo=?,cover=?,category=?,status=?,published_at=?,updated_at=?,version=version+1 WHERE id=? AND version=?').run(slug,title,excerpt,content,format,JSON.stringify(seoData),cover,categoryName,b.status,published,now,id,b.version);if(!saved.changes)fail('บทความถูกแก้ไขแล้ว กรุณาโหลดใหม่',409);if(current.slug!==slug){db.prepare('UPDATE cms_redirects SET target=? WHERE kind=? AND entity_id=?').run('/blog/'+slug,'post',id);db.prepare('INSERT INTO cms_redirects VALUES(?,?,?,?)').run('/blog/'+current.slug,'/blog/'+slug,'post',id);}}
+   else db.prepare('INSERT INTO posts(id,slug,title,excerpt,content,format,seo,cover,category,status,created_at,updated_at,published_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,slug,title,excerpt,content,format,JSON.stringify(seoData),cover,categoryName,b.status,now,now,published);
+   if(categoryName)db.prepare('INSERT OR IGNORE INTO cms_blog_categories VALUES(?)').run(categoryName);audit(session.email,'post.'+b.status,id);db.exec('COMMIT');
   }catch(error){db.exec('ROLLBACK');throw error;}
   send(res,current?200:201,db.prepare('SELECT * FROM posts WHERE id=?').get(id));return true;
  };

@@ -1,1 +1,24 @@
-{"name":"bbioplastweb","version":"2.0.0","private":true,"scripts":{"start":"node server.js","check":"node --check server.js && node --check backend.js && node --check public/app.js && node --check public/admin.js && node --check public/shop.js && node --check public/quote.js && node --check blog-backend.js && node --check public/blog-content.js && node --check public/blog.js && node --check public/admin-blog.js && node --check product-import.js && node --check product-import-parser.js && node --check public/admin-import.js","test":"node --test tests/*.test.js"},"engines":{"node":"24.x"},"dependencies":{"exceljs":"4.4.0"},"overrides":{"exceljs":{"uuid":"11.1.1"}}}
+{
+  "name": "bbioplastweb",
+  "version": "2.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && node --check backend.js && node --check public/app.js && node --check public/admin.js && node --check public/shop.js && node --check public/quote.js && node --check blog-backend.js && node --check public/blog-content.js && node --check public/blog.js && node --check public/admin-blog.js && node --check product-import.js && node --check product-import-parser.js && node --check public/admin-import.js && node --check cms-backend.js && node --check cms-content.js && node --check cms-pages.js && node --check cms-render.js && node --check public/admin-cms.js && node --check public/cms-site.js && node --check public/cms-safe-html.js && node --check public/works.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "engines": {
+    "node": "24.x"
+  },
+  "dependencies": {
+    "cheerio": "1.2.0",
+    "exceljs": "4.4.0",
+    "sanitize-html": "2.18.0",
+    "sharp": "0.35.5"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "11.1.1"
+    }
+  }
+}
