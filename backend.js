@@ -35,13 +35,22 @@ function createBackend(options={}){
  const limits=new Map();
  function rate(req,key,max=30){const ip=req.socket.remoteAddress||'unknown';const k=key+':'+ip;const t=Date.now();let item=limits.get(k);if(!item||t>item.until)item={count:0,until:t+600000};item.count++;limits.set(k,item);if(limits.size>10000){for(const [k,v]of limits)if(v.until<t)limits.delete(k);}if(item.count>max)fail('คำขอมากเกินไป กรุณาลองใหม่ใน 10 นาที',429);}
  function send(res,status,data){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'});res.end(JSON.stringify(data));}
- async function body(req,maxBytes=150000){if(!(req.headers['content-type']||'').startsWith('application/json'))fail('ต้องส่งข้อมูลแบบ JSON',415);const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>maxBytes)fail('ข้อมูลมีขนาดใหญ่เกินไป',413);chunks.push(chunk);}try{return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');}catch{fail('ข้อมูลไม่ถูกต้อง');}}
+ async function body(req,maxBytes=150000){
+  if(!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type']||''))fail('ต้องส่งข้อมูลแบบ JSON',415);
+  const chunks=[];let size=0;
+  for await(const chunk of req){size+=chunk.length;if(size>maxBytes)fail('ข้อมูลมีขนาดใหญ่เกินไป',413);chunks.push(chunk);}
+  let data;try{data=JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');}catch{fail('ข้อมูลไม่ถูกต้อง');}
+  if(data===null||typeof data!=='object'||Array.isArray(data))fail('ข้อมูลต้องเป็นออบเจ็กต์ JSON');
+  return data;
+ }
  function session(req){const cookies=(req.headers.cookie||'').split(';').map(v=>v.trim());const raw=cookies.find(v=>v.startsWith('bb_session='))?.slice(11);if(!raw)return null;return q('SELECT * FROM sessions WHERE hash=? AND expires>?',hash(raw),Date.now());}
  function auth(req){const s=session(req);if(!s)fail('กรุณาเข้าสู่ระบบ',401);if(!['GET','HEAD'].includes(req.method)&&req.headers['x-csrf-token']!==s.csrf)fail('กรุณารีเฟรชหน้าแล้วลองใหม่',403);return s;}
  function cookie(res,value,maxAge){res.setHeader('Set-Cookie',`bb_session=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${production?'; Secure':''}`);}
  const serialize=row=>{if(!row)return null;const {token_hash,request_key,...safe}=row;safe.items=JSON.parse(row.items);safe.itemCount=safe.items.length;safe.totalQuantity=safe.items.reduce((n,i)=>n+i.qty,0);safe.total=safe.items.some(i=>i.unitPrice===null)?null:safe.items.reduce((n,i)=>n+i.qty*i.unitPrice,0)+safe.shipping;return safe;};
  const product=row=>({...row,active:!!row.active,popular:!!row.popular});
  function validateProduct(b){const p={sku:text(b.sku,80),name:text(b.name,160),category_id:text(b.category_id,100),description:text(b.description,5000),image:text(b.image,1500),price:b.price??null,stock:b.stock??null,active:b.active===true?1:0,popular:b.popular===true?1:0};if(!p.sku||!p.name||!q('SELECT 1 FROM categories WHERE id=?',p.category_id))fail('กรุณาระบุ SKU ชื่อ และหมวดสินค้าให้ครบ');if(p.price!==null&&!integer(p.price))fail('ราคาไม่ถูกต้อง');if(p.stock!==null&&!integer(p.stock,0,1000000))fail('สต็อกไม่ถูกต้อง');if(p.image&&!/^https:\/\/[^\s]+$/i.test(p.image))fail('ลิงก์รูปภาพต้องเริ่มด้วย https://');return p;}
+ const skuKey=sku=>sku.trim().toLocaleLowerCase('en-US');
+ function uniqueSku(sku,id){if(all('SELECT id,sku FROM products').some(p=>p.id!==id&&skuKey(p.sku)===skuKey(sku)))fail('SKU นี้ถูกใช้แล้ว',409);}
  const blog=require('./blog-backend')({db,auth,body,send,fail,audit});
  const cms=require('./cms-backend')({db,dataDir,auth,body,send,fail,audit,transaction,rate});
  const productImport=require('./product-import')({db,auth,body,send,fail,audit,transaction,validateProduct});
@@ -61,9 +70,31 @@ function createBackend(options={}){
   if(typeof b.password!=='string'||b.password.length<12||b.password.length>128)fail('รหัสผ่านต้องมี 12–128 ตัวอักษร');
   const digest=await passwordHash(b.password);transaction(()=>{if(q('SELECT 1 FROM admins'))fail('ตั้งค่าแล้ว',409);run('INSERT INTO admins VALUES(?,?,?)',adminEmail,digest,now());audit(adminEmail,'admin.setup','admin');});send(res,201,{ok:true});return true;
  }
- if(p==='/api/auth/login'&&m==='POST'){rate(req,'auth',15);const b=await body(req);const a=q('SELECT * FROM admins WHERE email=?',text(b.email,254).toLowerCase());if(!a||typeof b.password!=='string'||b.password.length>128||!await passwordCheck(b.password,a.password_hash))fail('อีเมลหรือรหัสผ่านไม่ถูกต้อง',401);const raw=token(),csrf=token();run('DELETE FROM sessions WHERE expires<?',Date.now());run('INSERT INTO sessions VALUES(?,?,?,?)',hash(raw),a.email,csrf,Date.now()+8*3600000);cookie(res,raw,8*3600);send(res,200,{email:a.email,csrf});return true;}
+ if(p==='/api/auth/login'&&m==='POST'){
+  rate(req,'auth',15);const b=await body(req),a=q('SELECT * FROM admins WHERE email=?',text(b.email,254).toLowerCase());
+  if(!a||typeof b.password!=='string'||b.password.length>128||!await passwordCheck(b.password,a.password_hash))fail('อีเมลหรือรหัสผ่านไม่ถูกต้อง',401);
+  const raw=token(),csrf=token();
+  transaction(()=>{
+   // Password verification yields to other requests; a password change may have revoked access meanwhile.
+   if(q('SELECT password_hash FROM admins WHERE email=?',a.email)?.password_hash!==a.password_hash)fail('อีเมลหรือรหัสผ่านไม่ถูกต้อง',401);
+   run('DELETE FROM sessions WHERE expires<?',Date.now());
+   run('INSERT INTO sessions VALUES(?,?,?,?)',hash(raw),a.email,csrf,Date.now()+8*3600000);
+  });
+  cookie(res,raw,8*3600);send(res,200,{email:a.email,csrf});return true;
+ }
  if(p==='/api/auth/logout'&&m==='POST'){const s=auth(req);run('DELETE FROM sessions WHERE hash=?',s.hash);cookie(res,'',0);send(res,200,{ok:true});return true;}
- if(p==='/api/auth/password'&&m==='POST'){const s=auth(req);rate(req,'password',10);const b=await body(req);const a=q('SELECT * FROM admins WHERE email=?',s.email);if(typeof b.current!=='string'||b.current.length>128||!await passwordCheck(b.current,a.password_hash))fail('รหัสผ่านปัจจุบันไม่ถูกต้อง',403);if(typeof b.password!=='string'||b.password.length<12||b.password.length>128)fail('รหัสผ่านต้องมี 12–128 ตัวอักษร');const digest=await passwordHash(b.password);transaction(()=>{run('UPDATE admins SET password_hash=? WHERE email=?',digest,s.email);run('DELETE FROM sessions WHERE email=?',s.email);audit(s.email,'admin.password','admin');});cookie(res,'',0);send(res,200,{ok:true});return true;}
+ if(p==='/api/auth/password'&&m==='POST'){
+  const s=auth(req);rate(req,'password',10);const b=await body(req),a=q('SELECT * FROM admins WHERE email=?',s.email);
+  if(typeof b.current!=='string'||b.current.length>128||!await passwordCheck(b.current,a.password_hash))fail('รหัสผ่านปัจจุบันไม่ถูกต้อง',403);
+  if(typeof b.password!=='string'||b.password.length<12||b.password.length>128)fail('รหัสผ่านต้องมี 12–128 ตัวอักษร');
+  const digest=await passwordHash(b.password);
+  transaction(()=>{
+   if(session(req)?.hash!==s.hash||q('SELECT password_hash FROM admins WHERE email=?',s.email)?.password_hash!==a.password_hash)fail('บัญชีมีการเปลี่ยนแปลง กรุณาเข้าสู่ระบบใหม่',403);
+   run('UPDATE admins SET password_hash=? WHERE email=?',digest,s.email);
+   run('DELETE FROM sessions WHERE email=?',s.email);audit(s.email,'admin.password','admin');
+  });
+  cookie(res,'',0);send(res,200,{ok:true});return true;
+ }
  if(p==='/api/quotes'&&m==='POST'){
   rate(req,'quote',30);const b=await body(req);if(b.website)fail('คำขอไม่ถูกต้อง');if(!/^[a-zA-Z0-9-]{16,80}$/.test(b.requestKey||''))fail('รหัสคำขอไม่ถูกต้อง');
   if(!/^[a-f0-9]{64}$/.test(b.trackingToken||''))fail('รหัสติดตามไม่ถูกต้อง'); const prior=q('SELECT id,token_hash FROM quotes WHERE request_key=?',b.requestKey);if(prior){if(prior.token_hash!==hash(b.trackingToken))fail('คำขอซ้ำ',409);send(res,200,{id:prior.id,token:b.trackingToken});return true;}
@@ -80,7 +111,7 @@ function createBackend(options={}){
   if(p==='/api/admin/catalog'&&m==='GET'){send(res,200,{categories:all('SELECT * FROM categories ORDER BY name'),products:all('SELECT * FROM products ORDER BY updated_at DESC').map(product)});return true;}
   if(p==='/api/admin/categories'&&m==='POST'){const b=await body(req);const name=text(b.name,120);if(!name)fail('ระบุชื่อหมวดสินค้า');const id='cat-'+randomBytes(6).toString('hex');run('INSERT INTO categories(id,name) VALUES(?,?)',id,name);audit(s.email,'category.created',id);send(res,201,{id});return true;}
   const cm=p.match(/^\/api\/admin\/categories\/([a-zA-Z0-9-]+)$/);if(cm&&m==='PUT'){const b=await body(req);const name=text(b.name,120);if(!name)fail('ระบุชื่อหมวดสินค้า');if(!run('UPDATE categories SET name=? WHERE id=?',name,cm[1]).changes)fail('ไม่พบหมวดสินค้า',404);audit(s.email,'category.updated',cm[1]);send(res,200,{ok:true});return true;}
-  const pm=p.match(/^\/api\/admin\/products(?:\/([a-zA-Z0-9-]+))?$/);if(pm&&(m==='POST'||m==='PUT')){const b=await body(req),v=validateProduct(b);const id=pm[1]||'p-'+randomBytes(8).toString('hex');transaction(()=>{if(m==='PUT'){const current=q('SELECT * FROM products WHERE id=?',id);if(!current)fail('ไม่พบสินค้า',404);if(current.version!==b.version)fail('สินค้าถูกแก้ไขแล้ว กรุณาโหลดข้อมูลใหม่',409);run('UPDATE products SET sku=?,name=?,category_id=?,description=?,image=?,price=?,stock=?,active=?,popular=?,version=version+1,updated_at=? WHERE id=?',v.sku,v.name,v.category_id,v.description,v.image,v.price,v.stock,v.active,b.popular===undefined?current.popular:v.popular,now(),id);}else{run('INSERT INTO products(id,sku,name,category_id,description,image,price,stock,active,popular,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',id,v.sku,v.name,v.category_id,v.description,v.image,v.price,v.stock,v.active,v.popular,now());}audit(s.email,'product.saved',id);});send(res,200,{id});return true;}
+  const pm=p.match(/^\/api\/admin\/products(?:\/([a-zA-Z0-9-]+))?$/);if(pm&&(m==='POST'||m==='PUT')){const b=await body(req),v=validateProduct(b);const id=pm[1]||'p-'+randomBytes(8).toString('hex');transaction(()=>{if(m==='PUT'){const current=q('SELECT * FROM products WHERE id=?',id);if(!current)fail('ไม่พบสินค้า',404);if(current.version!==b.version)fail('สินค้าถูกแก้ไขแล้ว กรุณาโหลดข้อมูลใหม่',409);if(skuKey(v.sku)!==skuKey(current.sku))uniqueSku(v.sku,id);run('UPDATE products SET sku=?,name=?,category_id=?,description=?,image=?,price=?,stock=?,active=?,popular=?,version=version+1,updated_at=? WHERE id=?',v.sku,v.name,v.category_id,v.description,v.image,v.price,v.stock,v.active,b.popular===undefined?current.popular:v.popular,now(),id);}else{uniqueSku(v.sku);run('INSERT INTO products(id,sku,name,category_id,description,image,price,stock,active,popular,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',id,v.sku,v.name,v.category_id,v.description,v.image,v.price,v.stock,v.active,v.popular,now());}audit(s.email,'product.saved',id);});send(res,200,{id});return true;}
   if(p==='/api/admin/quotes'&&m==='GET'){send(res,200,all('SELECT * FROM quotes ORDER BY created_at DESC LIMIT 1000').map(serialize));return true;}
   const qm=p.match(/^\/api\/admin\/quotes\/([A-Z0-9-]+)(?:\/(offer|status|share))?$/);
   if(qm){const id=qm[1],action=qm[2];const row=q('SELECT * FROM quotes WHERE id=?',id);if(!row)fail('ไม่พบรายการ',404);if(m==='GET'&&!action){send(res,200,serialize(row));return true;}if(m==='POST'&&action==='share'){const raw=token();run('UPDATE quotes SET token_hash=? WHERE id=?',hash(raw),id);audit(s.email,'quote.link_rotated',id);send(res,200,{token:raw});return true;}

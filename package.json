@@ -4,8 +4,9 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check backend.js && node --check public/app.js && node --check public/admin.js && node --check public/shop.js && node --check public/quote.js && node --check blog-backend.js && node --check public/blog-content.js && node --check public/blog.js && node --check public/admin-blog.js && node --check product-import.js && node --check product-import-parser.js && node --check public/admin-import.js && node --check cms-backend.js && node --check cms-content.js && node --check cms-pages.js && node --check cms-render.js && node --check public/admin-cms.js && node --check public/cms-site.js && node --check public/cms-safe-html.js && node --check public/works.js && node --check quotation-items.js && node --check public/quotation-cart.js && node --check public/quotation-cart-page.js && node --check public/catalog.js && node --check public/popular.js",
-    "test": "node --test tests/*.test.js"
+    "check": "node scripts/check-code.cjs",
+    "test": "node --test tests/*.test.js",
+    "benchmark": "node scripts/benchmark-http.cjs"
   },
   "engines": {
     "node": "24.x"

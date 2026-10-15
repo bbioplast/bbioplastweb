@@ -4,7 +4,7 @@ function safeUrl(value,{image=false,contact=false,empty=true}={}){
  if(typeof value!=='string'||value.length>1800)throw Error('URL ไม่ถูกต้อง');const v=value.trim();
  if(!v&&empty)return '';
  if(/[\u0000-\u0020\u007f\\]/.test(v))throw Error('URL มีอักขระที่ไม่อนุญาต');
- if(v.startsWith('/')&&!v.startsWith('//')){if(image&&!/^\/(?:media\/[a-f0-9]{64}\.(?:png|jpg|webp)|assets\/[a-zA-Z0-9_./-]+)$/.test(v))throw Error('กรุณาเลือกรูปจากคลัง');return v;}
+ if(v.startsWith('/')&&!v.startsWith('//')){if(image&&(!/^\/(?:media\/[a-f0-9]{64}\.(?:png|jpg|webp)|assets\/[a-zA-Z0-9_./-]+)$/.test(v)||v.split('/').some(part=>part==='.'||part==='..')))throw Error('กรุณาเลือกรูปจากคลัง');return v;}
  if(!image&&v.startsWith('#'))return v;
  if(contact&&/^(?:tel:[+0-9()-]+|mailto:[^<>\s@]+@[^<>\s@]+\.[^<>\s@]+)$/.test(v))return v;
  const url=new URL(v);if(url.protocol!=='https:'||url.username||url.password)throw Error('URL ต้องเป็น HTTPS หรือลิงก์ภายในเว็บไซต์');return v;
